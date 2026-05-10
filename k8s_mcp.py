@@ -460,5 +460,25 @@ def create_cronjob(
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+# Default: streamable-http (so the FastAPI chat UI can connect over HTTP without extra env vars).
+# Override with MCP_TRANSPORT=stdio for clients (e.g. Cursor) that spawn this process directly,
+# or MCP_TRANSPORT=sse for the legacy SSE transport. Port is controlled by FASTMCP_PORT
+# (applied directly to mcp.settings since FastMCP doesn't always pick up the env var on its own).
 if __name__ == "__main__":
-    mcp.run()
+    transport = os.environ.get("MCP_TRANSPORT", "streamable-http").strip().lower()
+    port_env = os.environ.get("FASTMCP_PORT") or os.environ.get("MCP_PORT")
+    if port_env:
+        try:
+            mcp.settings.port = int(port_env)
+        except ValueError:
+            raise SystemExit(f"Invalid FASTMCP_PORT: {port_env!r}")
+    host_env = os.environ.get("FASTMCP_HOST") or os.environ.get("MCP_HOST")
+    if host_env:
+        mcp.settings.host = host_env
+
+    if transport in ("sse", "streamable-http"):
+        mcp.run(transport=transport)  # type: ignore[arg-type]
+    elif transport == "stdio":
+        mcp.run()
+    else:
+        raise SystemExit(f"Unknown MCP_TRANSPORT: {transport!r} (expected stdio, sse, or streamable-http)")

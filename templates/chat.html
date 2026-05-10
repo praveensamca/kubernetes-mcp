@@ -168,6 +168,7 @@
       display: block; text-align: center;
       font-size: 11px; color: #444; margin-top: 8px;
     }
+
   </style>
 </head>
 <body>
@@ -175,7 +176,7 @@
 <header>
   <div class="logo">⎈</div>
   <h1>K8s AI Assistant</h1>
-  <span>Powered by GPT-5.4-mini</span>
+  <span>Powered by GPT-5.4-mini · MCP (SSE)</span>
 </header>
 
 <div id="chat"></div>
@@ -302,18 +303,13 @@
       removeTyping();
 
       if (!res.ok) {
-        appendMessage('ai', `<span style="color:#f87171">⚠️ ${escapeHtml(data.detail || 'Unknown error')}</span>`);
+        const detail = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail || '');
+        appendMessage('ai', `<span style="color:#f87171">⚠️ ${escapeHtml(detail || 'Unknown error')}</span>`);
         return;
       }
 
-      const toolNames = (data.tools_called || []).map(t =>
-        typeof t === 'string' ? t.replace('call_', '') : JSON.stringify(t)
-      );
-
-      // Parse tool call_ids to friendly names from answer context
-      const toolMatches = (data.answer || '').match(/list_\w+|create_pod/g) || [];
+      const toolMatches = (data.answer || '').match(/list_\w+|create_\w+/g) || [];
       const badges = [...new Set([...toolMatches])];
-
       appendMessage('ai', marked.parse(data.answer || 'No response.'), badges);
     } catch (err) {
       removeTyping();
