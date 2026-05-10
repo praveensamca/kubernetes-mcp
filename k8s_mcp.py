@@ -458,6 +458,76 @@ def create_cronjob(
 
 
 # ---------------------------------------------------------------------------
+# Prompts
+# ---------------------------------------------------------------------------
+@mcp.prompt()
+def create_k8s_resource(
+    resource_type: Optional[str] = None,
+    namespace: Optional[str] = None,
+    name: Optional[str] = None,
+    image: Optional[str] = None,
+    replicas: Optional[int] = None,
+    schedule: Optional[str] = None,
+) -> str:
+    """Guided workflow for creating a Kubernetes Deployment, Pod, or CronJob.
+
+    The assistant must walk the user through the required fields, verify the
+    namespace exists, and only then call the matching create_* tool.
+
+    Args:
+        resource_type: 'deployment', 'pod', or 'cronjob' (optional — ask if missing).
+        namespace: Target namespace (optional — verify it exists, fall back to 'default' otherwise).
+        name: Resource name (optional — ask if missing).
+        image: Container image (optional — ask if missing).
+        replicas: Number of replicas, deployments only (optional).
+        schedule: Cron expression, cronjobs only (optional).
+    """
+    return f"""You are helping the user create a Kubernetes resource. Follow these steps strictly and in order. Do NOT call any create_* tool until every required field for the chosen resource type is confirmed by the user.
+
+STEP 1 — NAMESPACE
+    a. Call list_namespaces first.
+    b. Pre-filled namespace value: {namespace!r}
+       - If a namespace was provided AND it appears in the list, use it.
+       - If a namespace was provided but is NOT in the list, ask the user:
+         "Namespace '{namespace}' does not exist. Provide a different namespace, or shall I deploy to 'default'?"
+         Use whichever the user picks. Do NOT call create_namespace unless the user explicitly asks for it.
+       - If no namespace was provided (value is None), default silently to 'default' (no question needed).
+
+STEP 2 — RESOURCE TYPE
+    Pre-filled resource_type: {resource_type!r}
+    - If missing or unclear, ask: "What do you want to create — a Deployment, a Pod, or a CronJob?"
+    - Accept exactly one of: deployment, pod, cronjob.
+
+STEP 3 — COMMON FIELDS
+    Pre-filled name: {name!r}, image: {image!r}
+    - If name is missing, ask: "What name should the resource have?"
+    - If image is missing, ask: "Which container image? (e.g. nginx:latest)"
+
+STEP 4 — RESOURCE-SPECIFIC FIELDS
+    For DEPLOYMENT:
+        Pre-filled replicas: {replicas!r}
+        - If replicas missing, ask: "How many replicas?"
+        - Always ask for cpu (e.g. '100m', '0.5') and memory (e.g. '128Mi', '512Mi') — these are required by the tool.
+    For POD:
+        - No extra fields.
+    For CRONJOB:
+        Pre-filled schedule: {schedule!r}
+        - If schedule missing, ask: "What cron schedule? (e.g. '*/5 * * * *' for every 5 minutes)"
+
+STEP 5 — CONFIRM, THEN CALL THE TOOL
+    - Summarize all fields back to the user in a short bulleted list.
+    - Wait for the user to confirm.
+    - On confirmation, call exactly ONE of:
+        create_deployment(name, image, replicas, cpu, memory, namespace)
+        create_pod(name, image, namespace)
+        create_cronjob(name, image, schedule, namespace)
+    - Report the tool's result back to the user.
+
+Begin with STEP 1 now.
+"""
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 # Default: streamable-http (so the FastAPI chat UI can connect over HTTP without extra env vars).

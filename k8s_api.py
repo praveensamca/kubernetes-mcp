@@ -116,6 +116,42 @@ def _mcp_tools_to_openai(lt: mcp_types.ListToolsResult) -> list:
     return out
 
 
+def _prompt_message_text(msg: mcp_types.PromptMessage) -> str:
+    """Extract plain text from a PromptMessage's content (handles TextContent)."""
+    content = msg.content
+    if isinstance(content, mcp_types.TextContent):
+        return content.text or ""
+    text = getattr(content, "text", None)
+    return text or ""
+
+
+async def _fetch_mcp_prompts_as_system(session: ClientSession) -> str:
+    """List all MCP prompts, fetch the ones with no required args, return concatenated text.
+
+    Failures listing/fetching prompts are non-fatal — we just skip them so a query
+    still works against MCP servers that don't expose any prompts.
+    """
+    try:
+        listing = await session.list_prompts()
+    except Exception:
+        return ""
+
+    blocks: list[str] = []
+    for p in listing.prompts:
+        required_args = [a.name for a in (p.arguments or []) if getattr(a, "required", False)]
+        if required_args:
+            continue
+        try:
+            res = await session.get_prompt(p.name, {})
+        except Exception:
+            continue
+        parts = [_prompt_message_text(m) for m in res.messages]
+        body = "\n".join(part for part in parts if part).strip()
+        if body:
+            blocks.append(f"# Prompt: {p.name}\n{body}")
+    return "\n\n---\n\n".join(blocks)
+
+
 def _call_tool_result_to_plain(ct: mcp_types.CallToolResult) -> dict:
     try:
         return ct.model_dump(mode="json")
@@ -136,7 +172,6 @@ def _response_final_text(response) -> str:
 
 async def _ai_query_via_mcp_sse(sse_url: str, user_query: str) -> dict:
     norm = _normalize_mcp_sse_url(sse_url)
-    messages = [{"role": "user", "content": user_query}]
     async with sse_client(norm, timeout=60.0, sse_read_timeout=600.0) as streams:
         read_s, write_s = streams
         async with ClientSession(read_s, write_s) as session:
@@ -145,6 +180,12 @@ async def _ai_query_via_mcp_sse(sse_url: str, user_query: str) -> dict:
             openai_tools = _mcp_tools_to_openai(lt)
             if not openai_tools:
                 raise HTTPException(status_code=503, detail="MCP server returned no tools.")
+
+            system_prompt = await _fetch_mcp_prompts_as_system(session)
+            messages: list = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": user_query})
 
             resp1 = await anyio.to_thread.run_sync(
                 lambda: _throttled_create(
@@ -189,6 +230,7 @@ async def _ai_query_via_mcp_sse(sse_url: str, user_query: str) -> dict:
                 "tools_called": [t["call_id"] for t in tool_results],
                 "mcp_sse_url": norm,
                 "via_mcp": True,
+                "prompts_loaded": bool(system_prompt),
             }
 
 
