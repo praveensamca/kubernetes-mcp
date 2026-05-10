@@ -25,6 +25,54 @@ batch_v1 = client.BatchV1Api()
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+def list_namespaces() -> dict:
+    """List all Kubernetes namespaces.
+
+    Use this before creating resources in a non-default namespace to verify the
+    namespace exists; if it does not, call create_namespace first.
+    """
+    try:
+        namespaces = v1.list_namespace()
+        return {
+            "namespaces": [
+                {
+                    "name": ns.metadata.name,
+                    "status": ns.status.phase,
+                    "labels": ns.metadata.labels or {},
+                }
+                for ns in namespaces.items
+            ]
+        }
+    except client.exceptions.ApiException as e:
+        return {"error": e.reason, "status": e.status}
+
+
+@mcp.tool()
+def create_namespace(name: str, labels: Optional[dict] = None) -> dict:
+    """Create a Kubernetes namespace.
+
+    Call this when the user wants to create a resource in a namespace that does not
+    yet exist (verify with list_namespaces).
+
+    Args:
+        name: Name of the namespace.
+        labels: Optional labels to apply to the namespace.
+    """
+    ns_manifest = client.V1Namespace(
+        metadata=client.V1ObjectMeta(name=name, labels=labels),
+    )
+    try:
+        ns = v1.create_namespace(body=ns_manifest)
+        return {
+            "message": "Namespace created successfully",
+            "name": ns.metadata.name,
+            "status": ns.status.phase,
+        }
+    except client.exceptions.ApiException as e:
+        return {"error": e.reason, "status": e.status}
+
+
+@mcp.tool()
 def list_pods(namespace: Optional[str] = None) -> dict:
     """List all Kubernetes pods. Optionally filter by namespace."""
     try:

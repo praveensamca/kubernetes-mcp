@@ -141,6 +141,48 @@ class CronJobCreate(BaseModel):
     command: Optional[list] = None
 
 
+class NamespaceCreate(BaseModel):
+    name: str
+    labels: Optional[dict] = None
+
+
+# ---------------------------------------------------------------------------
+# Namespaces
+# ---------------------------------------------------------------------------
+@app.get("/namespaces", summary="List all namespaces")
+def list_namespaces():
+    try:
+        namespaces = v1.list_namespace()
+        return {
+            "namespaces": [
+                {
+                    "name": ns.metadata.name,
+                    "status": ns.status.phase,
+                    "labels": ns.metadata.labels or {},
+                }
+                for ns in namespaces.items
+            ]
+        }
+    except client.exceptions.ApiException as e:
+        raise HTTPException(status_code=e.status, detail=e.reason)
+
+
+@app.post("/namespaces", summary="Create a namespace", status_code=201)
+def create_namespace(body: NamespaceCreate):
+    ns_manifest = client.V1Namespace(
+        metadata=client.V1ObjectMeta(name=body.name, labels=body.labels),
+    )
+    try:
+        ns = v1.create_namespace(body=ns_manifest)
+        return {
+            "message": "Namespace created successfully",
+            "name": ns.metadata.name,
+            "status": ns.status.phase,
+        }
+    except client.exceptions.ApiException as e:
+        raise HTTPException(status_code=e.status, detail=e.reason)
+
+
 # ---------------------------------------------------------------------------
 # Pods
 # ---------------------------------------------------------------------------
@@ -478,6 +520,36 @@ def list_ingresses(namespace: Optional[str] = None):
 K8S_TOOLS = [
     {
         "type": "function",
+        "name": "list_namespaces",
+        "description": (
+            "List all Kubernetes namespaces. Use this before creating resources in a "
+            "non-default namespace to verify the namespace exists; if it does not, call "
+            "create_namespace first."
+        ),
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "type": "function",
+        "name": "create_namespace",
+        "description": (
+            "Create a Kubernetes namespace. Call this when the user wants to create a "
+            "resource in a namespace that does not yet exist (verify with list_namespaces)."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Name of the namespace."},
+                "labels": {
+                    "type": "object",
+                    "description": "Optional labels to apply to the namespace.",
+                    "additionalProperties": {"type": "string"},
+                },
+            },
+            "required": ["name"],
+        },
+    },
+    {
+        "type": "function",
         "name": "list_pods",
         "description": "List all Kubernetes pods. Optionally filter by namespace.",
         "parameters": {
@@ -670,6 +742,11 @@ K8S_TOOLS = [
 
 def _dispatch_tool(tool_name: str, args: dict):
     """Call the matching local function and return a JSON-serialisable result."""
+    if tool_name == "list_namespaces":
+        return list_namespaces()
+    if tool_name == "create_namespace":
+        body = NamespaceCreate(name=args["name"], labels=args.get("labels"))
+        return create_namespace(body)
     if tool_name == "list_pods":
         return list_pods(namespace=args.get("namespace"))
     if tool_name == "list_services":
